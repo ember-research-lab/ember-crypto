@@ -1,0 +1,22 @@
+[package]
+name = "ember-crypto"
+description = "Ember's shared cryptographic primitives behind a crypto-agility interface: Ed25519 (classical), ML-DSA/FIPS-204 (post-quantum), and a hybrid Ed25519+ML-DSA scheme (the migration posture — secure against a break in EITHER). SHA-256 content addressing + key ids. The single place the org's sign/verify lives — reused by cortex (ledger signing, Ed25519-only for substrate compat), ember-graph (provenance envelopes), the SMB platform (per-agent keys). Key custody is the consumer's (ember-vault); this crate never persists key material. Algorithm is always named, never hardcoded — Ed25519 -> ML-DSA is additive."
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[features]
+default = ["pqc"]
+# Post-quantum (ML-DSA / FIPS 204) + the hybrid scheme. On by default; a consumer that must stay
+# classical (cortex substrate compat) disables it (`default-features = false`).
+pqc = ["dep:fips204"]
+
+[dependencies]
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+sha2 = "0.10"
+rand = "0.8"
+zeroize = "1"
+fips204 = { version = "0.4", optional = true }
