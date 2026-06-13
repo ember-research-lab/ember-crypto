@@ -9,10 +9,13 @@ license = "MIT"
 unsafe_code = "forbid"
 
 [features]
-default = ["pqc"]
+default = ["pqc", "aead"]
 # Post-quantum (ML-DSA / FIPS 204) + the hybrid scheme. On by default; a consumer that must stay
 # classical (cortex substrate compat) disables it (`default-features = false`).
 pqc = ["dep:fips204"]
+# Authenticated encryption (XChaCha20-Poly1305) — symmetric seal/open for at-rest encryption (the
+# SMB platform's per-subject crypto-shred; ember-vault's sealed backend). Independently toggleable.
+aead = ["dep:chacha20poly1305"]
 
 [dependencies]
 ed25519-dalek = { version = "2", features = ["rand_core"] }
@@ -20,3 +23,6 @@ sha2 = "0.10"
 rand = "0.8"
 zeroize = "1"
 fips204 = { version = "0.4", optional = true }
+# XChaCha20-Poly1305 AEAD (RustCrypto, pure-Rust, audited). Extended 192-bit nonce ⇒ a random nonce
+# per message is safe without counter management. Optional, behind the `aead` feature.
+chacha20poly1305 = { version = "0.10", optional = true }

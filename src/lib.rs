@@ -42,6 +42,11 @@ mod hybrid;
 #[cfg(feature = "pqc")]
 pub use hybrid::HybridScheme;
 
+#[cfg(feature = "aead")]
+pub mod aead;
+#[cfg(feature = "aead")]
+pub use aead::{AeadScheme, XChaCha20Poly1305Scheme};
+
 /// Canonical algorithm ids — the crypto-agility header values. Stored on every key and signature and
 /// matched by the [`SchemeRegistry`]. Never branch on anything else.
 pub mod alg {
@@ -51,6 +56,8 @@ pub mod alg {
     pub const ML_DSA_65: &str = "ml-dsa-65";
     /// Ed25519 + ML-DSA-65 robust combiner (both required to verify).
     pub const HYBRID_ED25519_ML_DSA_65: &str = "hybrid-ed25519-ml-dsa-65";
+    /// XChaCha20-Poly1305 AEAD (symmetric authenticated encryption).
+    pub const XCHACHA20_POLY1305: &str = "xchacha20-poly1305";
 }
 
 /// Errors from key generation, signing, parsing, or verification. An enum, never a string — a
@@ -72,6 +79,9 @@ pub enum CryptoError {
     UnknownAlgorithm(String),
     /// The signature did not verify (tamper, wrong key, or a forgery attempt).
     VerificationFailed,
+    /// An AEAD operation failed internally (RNG, or the cipher backend rejected the inputs). A
+    /// failed *open* (bad tag / tamper / wrong key / wrong AAD) is [`VerificationFailed`], not this.
+    Aead(&'static str),
 }
 
 impl fmt::Display for CryptoError {
@@ -86,6 +96,7 @@ impl fmt::Display for CryptoError {
             }
             CryptoError::UnknownAlgorithm(a) => write!(f, "unknown algorithm: {a}"),
             CryptoError::VerificationFailed => write!(f, "signature verification failed"),
+            CryptoError::Aead(e) => write!(f, "aead operation failed: {e}"),
         }
     }
 }
