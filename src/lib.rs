@@ -271,6 +271,19 @@ pub fn random_hex(n_bytes: usize) -> String {
     s
 }
 
+/// HMAC-SHA1 of `msg` under `key` (20 bytes). The one MAC RFC-6238 **TOTP** needs (SHA-1 is the
+/// default authenticator-app variant — Google Authenticator/Authy/1Password/etc.). HMAC's security
+/// does **not** rest on SHA-1's broken collision resistance, so HMAC-SHA1 remains sound for TOTP;
+/// don't reach for it for anything else. Gated behind `hmac-sha1` so the SHA-1 dep is opt-in.
+#[cfg(feature = "hmac-sha1")]
+pub fn hmac_sha1(key: &[u8], msg: &[u8]) -> [u8; 20] {
+    use hmac::{Mac, SimpleHmac};
+    let mut mac =
+        SimpleHmac::<sha1::Sha1>::new_from_slice(key).expect("HMAC takes a key of any size");
+    mac.update(msg);
+    mac.finalize().into_bytes().into()
+}
+
 /// **Constant-time** byte-slice equality — no early-out on the first differing byte, so a secret
 /// (a token hash, a MAC) isn't probeable through response timing. Unequal lengths return `false`
 /// fast (the length is not itself the secret). The org's one constant-time compare.
@@ -398,6 +411,15 @@ mod tests {
             .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
         assert_eq!(random_bytes(0).len(), 0);
         assert_eq!(random_bytes(48).len(), 48);
+    }
+
+    #[cfg(feature = "hmac-sha1")]
+    #[test]
+    fn hmac_sha1_matches_rfc2202_vector() {
+        // RFC 2202 test case 1: key = 0x0b × 20, data = "Hi There".
+        let mac = hmac_sha1(&[0x0b; 20], b"Hi There");
+        let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(hex, "b617318655057264e28bc0b6fb378c8ef146be00");
     }
 
     #[test]
