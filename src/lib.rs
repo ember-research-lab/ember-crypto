@@ -242,6 +242,56 @@ pub fn content_hash(bytes: &[u8]) -> [u8; 32] {
     h.finalize().into()
 }
 
+/// Fill a buffer with cryptographically secure random bytes from the OS CSPRNG. The org's single
+/// CSPRNG entry point — token/session-id/nonce material everywhere draws from here, so a weak source
+/// can never sneak into one consumer.
+pub fn fill_random(buf: &mut [u8]) {
+    use rand::RngCore;
+    rand::rngs::OsRng.fill_bytes(buf);
+}
+
+/// `n` cryptographically secure random bytes from the OS CSPRNG, in a buffer that **zeroizes on
+/// drop** (so token material doesn't linger in freed memory). The basis for [`random_hex`].
+pub fn random_bytes(n: usize) -> zeroize::Zeroizing<Vec<u8>> {
+    let mut v = zeroize::Zeroizing::new(vec![0u8; n]);
+    fill_random(&mut v);
+    v
+}
+
+/// A lowercase-hex token of `n_bytes` of CSPRNG entropy (the string is `2 * n_bytes` chars). The
+/// standard way to mint an opaque, unguessable id (session id, login token, CSRF state). 16 bytes =
+/// 128 bits is the common choice.
+pub fn random_hex(n_bytes: usize) -> String {
+    let raw = random_bytes(n_bytes);
+    let mut s = String::with_capacity(n_bytes * 2);
+    for b in raw.iter() {
+        s.push(nibble_lower(b >> 4));
+        s.push(nibble_lower(b & 0x0f));
+    }
+    s
+}
+
+/// **Constant-time** byte-slice equality — no early-out on the first differing byte, so a secret
+/// (a token hash, a MAC) isn't probeable through response timing. Unequal lengths return `false`
+/// fast (the length is not itself the secret). The org's one constant-time compare.
+pub fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+fn nibble_lower(n: u8) -> char {
+    match n {
+        0..=9 => (b'0' + n) as char,
+        _ => (b'a' + (n - 10)) as char,
+    }
+}
+
 /// Short key id for a public key: the first 6 hex chars (uppercase) of `SHA-256(public_key_bytes)`.
 ///
 /// **Byte-identical to cortex's `compute_key_id`** (`cortex-core::signing`) — for an Ed25519 public
@@ -335,6 +385,27 @@ mod tests {
             hex,
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
+    }
+
+    #[test]
+    fn random_hex_is_unique_right_length_and_hex() {
+        let a = random_hex(16);
+        let b = random_hex(16);
+        assert_eq!(a.len(), 32, "16 bytes → 32 hex chars");
+        assert_ne!(a, b, "two draws differ (CSPRNG, not a constant)");
+        assert!(a
+            .bytes()
+            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+        assert_eq!(random_bytes(0).len(), 0);
+        assert_eq!(random_bytes(48).len(), 48);
+    }
+
+    #[test]
+    fn ct_eq_matches_only_equal_slices() {
+        assert!(ct_eq(b"abc", b"abc"));
+        assert!(!ct_eq(b"abc", b"abd"));
+        assert!(!ct_eq(b"abc", b"ab"), "length differs");
+        assert!(ct_eq(b"", b""));
     }
 
     #[cfg(feature = "pqc")]
