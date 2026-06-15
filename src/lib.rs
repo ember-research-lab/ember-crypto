@@ -284,6 +284,19 @@ pub fn hmac_sha1(key: &[u8], msg: &[u8]) -> [u8; 20] {
     mac.finalize().into_bytes().into()
 }
 
+/// HMAC-SHA256 of `msg` under `key` (32 bytes). The MAC behind modern **webhook request signing** —
+/// Slack's `v0=` header, Stripe/GitHub `sha256=`. A receiver recomputes it over the raw request body
+/// and [`ct_eq`]-compares against the sender's header to prove the request really came from the
+/// platform (and wasn't tampered with). Gated behind `hmac-sha256`. SHA-256, unlike SHA-1, is also
+/// collision-resistant, so this one is fine for general-purpose authentication.
+#[cfg(feature = "hmac-sha256")]
+pub fn hmac_sha256(key: &[u8], msg: &[u8]) -> [u8; 32] {
+    use hmac::{Mac, SimpleHmac};
+    let mut mac = SimpleHmac::<Sha256>::new_from_slice(key).expect("HMAC takes a key of any size");
+    mac.update(msg);
+    mac.finalize().into_bytes().into()
+}
+
 /// **Constant-time** byte-slice equality — no early-out on the first differing byte, so a secret
 /// (a token hash, a MAC) isn't probeable through response timing. Unequal lengths return `false`
 /// fast (the length is not itself the secret). The org's one constant-time compare.
@@ -420,6 +433,18 @@ mod tests {
         let mac = hmac_sha1(&[0x0b; 20], b"Hi There");
         let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
         assert_eq!(hex, "b617318655057264e28bc0b6fb378c8ef146be00");
+    }
+
+    #[cfg(feature = "hmac-sha256")]
+    #[test]
+    fn hmac_sha256_matches_rfc4231_vector() {
+        // RFC 4231 test case 1: key = 0x0b × 20, data = "Hi There".
+        let mac = hmac_sha256(&[0x0b; 20], b"Hi There");
+        let hex: String = mac.iter().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(
+            hex,
+            "b0344c61d8db38535ca8afceaf0bf12b881dc200c9833da726e9376c2e32cff7"
+        );
     }
 
     #[test]
