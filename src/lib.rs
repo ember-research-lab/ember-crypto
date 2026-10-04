@@ -353,7 +353,8 @@ fn nibble_upper(n: u8) -> char {
 /// Only the hybrid (PQC) scheme needs this, so it's gated with it.
 #[cfg(feature = "pqc")]
 pub(crate) fn lp_pack(parts: &[&[u8]]) -> Vec<u8> {
-    let mut out = Vec::new();
+    // Sized up front: a growing Vec would leave copies of (possibly secret) bytes in freed memory.
+    let mut out = Vec::with_capacity(parts.iter().map(|p| 4 + p.len()).sum());
     for p in parts {
         out.extend_from_slice(&(p.len() as u32).to_le_bytes());
         out.extend_from_slice(p);

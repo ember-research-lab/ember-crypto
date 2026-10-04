@@ -19,7 +19,7 @@ single algorithm.
 | `Ed25519Scheme` | `ed25519` | Classical EdDSA. Always available. Key ids are **byte-identical to cortex** (`compute_key_id`), so identities line up across the ledger. |
 | `MlDsa65Scheme` *(feature `pqc`)* | `ml-dsa-65` | ML-DSA-65 / NIST **FIPS-204**, post-quantum. Pure-Rust (`fips204`) — no C, no aws-lc-rs. |
 | `HybridV2Scheme` *(feature `pqc`)* | `hybrid-ed25519-ml-dsa-65-v2` | Ed25519 **and** ML-DSA-65; both sign under a hybrid-only domain, **both must verify**. **Sign with this.** |
-| `HybridScheme` *(feature `pqc`)* | `hybrid-ed25519-ml-dsa-65` | v1: both components sign the raw message, so each is also a valid standalone signature. Registered so existing v1 signatures keep verifying; don't sign new data with it. |
+| `HybridScheme` *(feature `pqc`)* | `hybrid-ed25519-ml-dsa-65` | v1: both components sign the raw message, so each is also a valid standalone signature. **Verify-only** (`sign` refuses); registered so existing v1 signatures keep verifying. |
 
 ### Why hybrid is the migration posture
 
@@ -29,10 +29,12 @@ and protection against "harvest now, forge later" — without betting on which b
 without discarding Ed25519's decades of scrutiny. Sign hybrid now; when one side is eventually retired
 the registry just stops offering it, and verification of old envelopes is unaffected.
 
-The v2 hybrid domain-separates each component: Ed25519 signs `V2_DOMAIN || 0x00 || msg` and ML-DSA-65
-signs `msg` under FIPS-204 context `V2_DOMAIN`. A component lifted out of a v2 signature therefore
-does not verify as a standalone Ed25519 or ML-DSA-65 signature, so a hybrid can't be stripped down
-to its weaker half by a verifier that also trusts a component key on its own.
+The v2 hybrid domain-separates each component and binds it to the composite key. With
+`H = SHA-256(composite public key)`, Ed25519 signs `V2_DOMAIN || 0x00 || H || msg` and ML-DSA-65 signs
+`H || msg` under FIPS-204 context `V2_DOMAIN`. So a component lifted out of a v2 signature does not
+verify as a standalone Ed25519 or ML-DSA-65 signature (no stripping a hybrid to its weaker half), and
+components from two hybrid keys can't be recombined under a mixed key. v1 is verify-only: its `sign`
+refuses. Generate fresh v2 keys; don't relabel v1 keys.
 
 ## What this crate is *not*
 
@@ -84,4 +86,5 @@ let id = key_id(&kp.public); // short, cortex-compatible identity tag
 tamper/wrong-key/flipped-byte rejection, malformed-vs-failed distinction, cortex key-id parity, the
 crypto-agility registry (fail-closed on unknown algorithm), and — for the hybrid — that corrupting
 **either** component alone still fails verification, that a v2 component lifted out of the hybrid
-does not verify standalone, and that relabelling a signature between hybrid versions fails.
+does not verify standalone, that components from two keys don't recombine, that relabelling a
+signature between hybrid versions fails, and a committed v2 vector that must keep verifying.

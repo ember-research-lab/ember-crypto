@@ -98,6 +98,19 @@ pub(crate) fn verify_with_ctx(
     }
 }
 
+/// The public key for an ML-DSA-65 secret key. Checks only the key bytes: the caller owns the
+/// algorithm-id check. Used by the v2 hybrid to bind the composite public key.
+pub(crate) fn public_from_secret(secret: &SecretKey) -> Result<Vec<u8>, CryptoError> {
+    let sk_arr: [u8; ml_dsa_65::SK_LEN] = secret
+        .bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::MalformedKey)?;
+    let sk =
+        ml_dsa_65::PrivateKey::try_from_bytes(sk_arr).map_err(|_| CryptoError::MalformedKey)?;
+    Ok(sk.get_public_key().into_bytes().to_vec())
+}
+
 fn ensure_alg(algorithm: &str) -> Result<(), CryptoError> {
     if algorithm == alg::ML_DSA_65 {
         Ok(())

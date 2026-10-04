@@ -80,6 +80,21 @@ impl SignatureScheme for Ed25519Scheme {
     }
 }
 
+/// The public key for an Ed25519 secret key (the 32-byte seed). Checks only the key bytes: the
+/// caller owns the algorithm-id check. Used by the v2 hybrid to bind the composite public key.
+#[cfg(feature = "pqc")]
+pub(crate) fn public_from_secret(secret: &SecretKey) -> Result<Vec<u8>, CryptoError> {
+    let arr: [u8; SK_LEN] = secret
+        .bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::MalformedKey)?;
+    Ok(SigningKey::from_bytes(&arr)
+        .verifying_key()
+        .to_bytes()
+        .to_vec())
+}
+
 fn ensure_alg(algorithm: &str) -> Result<(), CryptoError> {
     if algorithm == alg::ED25519 {
         Ok(())
