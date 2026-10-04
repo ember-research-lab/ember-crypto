@@ -11,10 +11,12 @@
 //! - [`Ed25519Scheme`] — classical EdDSA. Always available. The substrate cortex's ledger already
 //!   signs with (key ids are byte-identical — see [`key_id`]).
 //! - [`MlDsa65Scheme`] *(feature `pqc`)* — ML-DSA-65 / FIPS-204, the NIST post-quantum signature.
-//! - [`HybridScheme`] *(feature `pqc`)* — Ed25519 **and** ML-DSA-65, both signing the message, both
-//!   required to verify. The robust combiner: a forgery needs to break *both*, so the hybrid stays
-//!   unforgeable as long as **either** component does. This is the migration posture — sign hybrid
-//!   now, and you're covered whether the threat that lands first is a classical break or a quantum one.
+//! - [`HybridV2Scheme`] *(feature `pqc`)* — Ed25519 **and** ML-DSA-65, both signing the message under
+//!   a hybrid-only domain, both required to verify. The robust combiner: a forgery needs to break
+//!   *both*, so the hybrid stays unforgeable as long as **either** component does. This is the
+//!   migration posture — sign hybrid now, and you're covered whether the threat that lands first is a
+//!   classical break or a quantum one. [`HybridScheme`] (v1, no domain separation) stays registered
+//!   so existing v1 signatures keep verifying; don't sign new data with it.
 //!
 //! ## What this crate is *not*
 //! It never persists, escrows, or rotates key material — **custody is the consumer's** (ember-vault).
@@ -40,7 +42,7 @@ pub use mldsa::MlDsa65Scheme;
 #[cfg(feature = "pqc")]
 mod hybrid;
 #[cfg(feature = "pqc")]
-pub use hybrid::HybridScheme;
+pub use hybrid::{HybridScheme, HybridV2Scheme, V2_DOMAIN};
 
 #[cfg(feature = "aead")]
 pub mod aead;
@@ -54,8 +56,12 @@ pub mod alg {
     pub const ED25519: &str = "ed25519";
     /// ML-DSA-65 (NIST FIPS-204), post-quantum.
     pub const ML_DSA_65: &str = "ml-dsa-65";
-    /// Ed25519 + ML-DSA-65 robust combiner (both required to verify).
+    /// Ed25519 + ML-DSA-65 robust combiner, v1 (both required to verify). Components sign the raw
+    /// message, so each is also a standalone signature. Verify-only; sign with the v2 id.
     pub const HYBRID_ED25519_ML_DSA_65: &str = "hybrid-ed25519-ml-dsa-65";
+    /// Ed25519 + ML-DSA-65 robust combiner, v2: components sign under a hybrid-only domain, so a
+    /// component lifted out of the hybrid doesn't verify standalone.
+    pub const HYBRID_ED25519_ML_DSA_65_V2: &str = "hybrid-ed25519-ml-dsa-65-v2";
     /// XChaCha20-Poly1305 AEAD (symmetric authenticated encryption).
     pub const XCHACHA20_POLY1305: &str = "xchacha20-poly1305";
 }
@@ -198,7 +204,8 @@ impl SchemeRegistry {
         #[cfg(feature = "pqc")]
         let reg = reg
             .with(Box::new(MlDsa65Scheme))
-            .with(Box::new(HybridScheme));
+            .with(Box::new(HybridScheme))
+            .with(Box::new(HybridV2Scheme));
         reg
     }
 

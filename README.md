@@ -18,7 +18,8 @@ single algorithm.
 |---|---|---|
 | `Ed25519Scheme` | `ed25519` | Classical EdDSA. Always available. Key ids are **byte-identical to cortex** (`compute_key_id`), so identities line up across the ledger. |
 | `MlDsa65Scheme` *(feature `pqc`)* | `ml-dsa-65` | ML-DSA-65 / NIST **FIPS-204**, post-quantum. Pure-Rust (`fips204`) — no C, no aws-lc-rs. |
-| `HybridScheme` *(feature `pqc`)* | `hybrid-ed25519-ml-dsa-65` | Ed25519 **and** ML-DSA-65; both sign, **both must verify**. |
+| `HybridV2Scheme` *(feature `pqc`)* | `hybrid-ed25519-ml-dsa-65-v2` | Ed25519 **and** ML-DSA-65; both sign under a hybrid-only domain, **both must verify**. **Sign with this.** |
+| `HybridScheme` *(feature `pqc`)* | `hybrid-ed25519-ml-dsa-65` | v1: both components sign the raw message, so each is also a valid standalone signature. Registered so existing v1 signatures keep verifying; don't sign new data with it. |
 
 ### Why hybrid is the migration posture
 
@@ -27,6 +28,11 @@ it stays unforgeable as long as **either** Ed25519 or ML-DSA-65 is. You get clas
 and protection against "harvest now, forge later" — without betting on which break lands first, and
 without discarding Ed25519's decades of scrutiny. Sign hybrid now; when one side is eventually retired
 the registry just stops offering it, and verification of old envelopes is unaffected.
+
+The v2 hybrid domain-separates each component: Ed25519 signs `V2_DOMAIN || 0x00 || msg` and ML-DSA-65
+signs `msg` under FIPS-204 context `V2_DOMAIN`. A component lifted out of a v2 signature therefore
+does not verify as a standalone Ed25519 or ML-DSA-65 signature, so a hybrid can't be stripped down
+to its weaker half by a verifier that also trusts a component key on its own.
 
 ## What this crate is *not*
 
@@ -58,10 +64,10 @@ ember-crypto = { path = "../ember-crypto", default-features = false }
 ## Usage
 
 ```rust
-use ember_crypto::{SchemeRegistry, SignatureScheme, HybridScheme, key_id};
+use ember_crypto::{SchemeRegistry, SignatureScheme, HybridV2Scheme, key_id};
 
-let kp = HybridScheme.generate()?;
-let sig = HybridScheme.sign(&kp.secret, b"agent action payload")?;
+let kp = HybridV2Scheme.generate()?;
+let sig = HybridV2Scheme.sign(&kp.secret, b"agent action payload")?;
 
 // Verify without knowing the algorithm in advance — the registry dispatches on the signature.
 let registry = SchemeRegistry::standard();
@@ -77,4 +83,5 @@ let id = key_id(&kp.public); // short, cortex-compatible identity tag
 `default` / `--no-default-features` / `--all-features`, fmt clean. Tests cover sign/verify roundtrips,
 tamper/wrong-key/flipped-byte rejection, malformed-vs-failed distinction, cortex key-id parity, the
 crypto-agility registry (fail-closed on unknown algorithm), and — for the hybrid — that corrupting
-**either** component alone still fails verification.
+**either** component alone still fails verification, that a v2 component lifted out of the hybrid
+does not verify standalone, and that relabelling a signature between hybrid versions fails.

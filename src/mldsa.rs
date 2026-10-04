@@ -4,7 +4,8 @@
 //! Ember suite's ethos. ML-DSA-65 is the middle parameter set (NIST security category 3): public key
 //! 1952 B, secret key 4032 B, signature 3309 B.
 //!
-//! Signing uses the empty FIPS-204 context string (`ctx = b""`). Domain separation between *facts* is
+//! [`MlDsa65Scheme`] signs with the empty FIPS-204 context string (`ctx = b""`); the v2 hybrid uses
+//! its own context through [`sign_with_ctx`]/[`verify_with_ctx`]. Domain separation between *facts* is
 //! the consumer's job — they bind the subject id into the message they hand us (ember-graph's
 //! `signed_payload` already length-prefixes the subject), so we don't overload `ctx` for it.
 
@@ -40,40 +41,60 @@ impl SignatureScheme for MlDsa65Scheme {
 
     fn sign(&self, secret: &SecretKey, msg: &[u8]) -> Result<Signature, CryptoError> {
         ensure_alg(secret.algorithm)?;
-        let sk_arr: [u8; ml_dsa_65::SK_LEN] = secret
-            .bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| CryptoError::MalformedKey)?;
-        let sk =
-            ml_dsa_65::PrivateKey::try_from_bytes(sk_arr).map_err(|_| CryptoError::MalformedKey)?;
-        let sig = sk.try_sign(msg, CTX).map_err(CryptoError::Sign)?;
-        Ok(Signature {
-            algorithm: alg::ML_DSA_65,
-            bytes: sig.to_vec(),
-        })
+        sign_with_ctx(secret, msg, CTX)
     }
 
     fn verify(&self, public: &PublicKey, msg: &[u8], sig: &Signature) -> Result<(), CryptoError> {
         ensure_alg(public.algorithm)?;
         ensure_alg(sig.algorithm)?;
-        let pk_arr: [u8; ml_dsa_65::PK_LEN] = public
-            .bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| CryptoError::MalformedKey)?;
-        let pk =
-            ml_dsa_65::PublicKey::try_from_bytes(pk_arr).map_err(|_| CryptoError::MalformedKey)?;
-        let sig_arr: [u8; ml_dsa_65::SIG_LEN] = sig
-            .bytes
-            .as_slice()
-            .try_into()
-            .map_err(|_| CryptoError::MalformedSignature)?;
-        if pk.verify(msg, &sig_arr, CTX) {
-            Ok(())
-        } else {
-            Err(CryptoError::VerificationFailed)
-        }
+        verify_with_ctx(public, msg, sig, CTX)
+    }
+}
+
+/// Sign with an explicit FIPS-204 context string. The public scheme uses the empty context; the
+/// hybrid v2 combiner passes its own, so its ML-DSA component never verifies standalone. Checks
+/// only the key bytes: the caller owns the algorithm-id check.
+pub(crate) fn sign_with_ctx(
+    secret: &SecretKey,
+    msg: &[u8],
+    ctx: &[u8],
+) -> Result<Signature, CryptoError> {
+    let sk_arr: [u8; ml_dsa_65::SK_LEN] = secret
+        .bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::MalformedKey)?;
+    let sk =
+        ml_dsa_65::PrivateKey::try_from_bytes(sk_arr).map_err(|_| CryptoError::MalformedKey)?;
+    let sig = sk.try_sign(msg, ctx).map_err(CryptoError::Sign)?;
+    Ok(Signature {
+        algorithm: alg::ML_DSA_65,
+        bytes: sig.to_vec(),
+    })
+}
+
+/// Verify with an explicit FIPS-204 context string (see [`sign_with_ctx`]).
+pub(crate) fn verify_with_ctx(
+    public: &PublicKey,
+    msg: &[u8],
+    sig: &Signature,
+    ctx: &[u8],
+) -> Result<(), CryptoError> {
+    let pk_arr: [u8; ml_dsa_65::PK_LEN] = public
+        .bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::MalformedKey)?;
+    let pk = ml_dsa_65::PublicKey::try_from_bytes(pk_arr).map_err(|_| CryptoError::MalformedKey)?;
+    let sig_arr: [u8; ml_dsa_65::SIG_LEN] = sig
+        .bytes
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::MalformedSignature)?;
+    if pk.verify(msg, &sig_arr, ctx) {
+        Ok(())
+    } else {
+        Err(CryptoError::VerificationFailed)
     }
 }
 
