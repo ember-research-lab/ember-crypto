@@ -4,7 +4,7 @@
 //! generated here is the *same bytes* cortex's ledger stores in `.private_key` / `identity.json`,
 //! and [`key_id`](crate::key_id) over the public key matches cortex's id for that identity.
 
-use ed25519_dalek::{Signature as DalekSig, Signer as _, SigningKey, Verifier as _, VerifyingKey};
+use ed25519_dalek::{Signature as DalekSig, Signer as _, SigningKey, VerifyingKey};
 
 use crate::{alg, CryptoError, Keypair, PublicKey, SecretKey, SignatureScheme};
 
@@ -71,16 +71,12 @@ impl SignatureScheme for Ed25519Scheme {
             .try_into()
             .map_err(|_| CryptoError::MalformedSignature)?;
         let dsig = DalekSig::from_bytes(&sig_arr);
-        // verify_strict rejects the small-order / malleable edge cases plain verify accepts.
+        // Strict only, never a fallback to plain `verify`: plain `verify` accepts weak (small-order)
+        // public keys, under which one fixed signature verifies every message. A fallback would make
+        // the accepted set exactly plain `verify`'s. An honestly generated key and signature always
+        // pass `verify_strict`.
         vk.verify_strict(msg, &dsig)
             .map_err(|_| CryptoError::VerificationFailed)
-            .or_else(|_| {
-                // verify_strict can reject some valid signatures from non-strict signers; fall back to
-                // the standard check so we never reject a genuinely-valid signature, while still having
-                // tried the stricter gate first.
-                vk.verify(msg, &dsig)
-                    .map_err(|_| CryptoError::VerificationFailed)
-            })
     }
 }
 
@@ -164,6 +160,54 @@ mod tests {
         assert_eq!(
             Ed25519Scheme.verify(&kp.public, b"m", &bad_sig),
             Err(CryptoError::MalformedSignature)
+        );
+    }
+
+    /// Negative vectors every Ed25519 verify must reject. A "compatibility" fallback that widens
+    /// acceptance fails here.
+    #[test]
+    fn weak_identity_key_universal_signature_is_rejected() {
+        // Public key = the identity point; signature = R identity || s = 0. Plain `verify` accepts
+        // this for every message.
+        let mut identity = [0u8; PK_LEN];
+        identity[0] = 1;
+        let pk = PublicKey {
+            algorithm: alg::ED25519,
+            bytes: identity.to_vec(),
+        };
+        let mut sig_bytes = [0u8; SIG_LEN];
+        sig_bytes[0] = 1;
+        let sig = crate::Signature {
+            algorithm: alg::ED25519,
+            bytes: sig_bytes.to_vec(),
+        };
+        for msg in [&b"pay alice 1"[..], b"pay mallory 1000000", b""] {
+            assert_eq!(
+                Ed25519Scheme.verify(&pk, msg, &sig),
+                Err(CryptoError::VerificationFailed)
+            );
+        }
+    }
+
+    #[test]
+    fn non_canonical_s_is_rejected() {
+        // s + L (the group order) is the same scalar mod L but a different, malleated encoding.
+        const L: [u8; 32] = [
+            0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58, 0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9,
+            0xde, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x10,
+        ];
+        let kp = Ed25519Scheme.generate().unwrap();
+        let mut sig = Ed25519Scheme.sign(&kp.secret, b"m").unwrap();
+        let mut carry = 0u16;
+        for (b, l) in sig.bytes[32..].iter_mut().zip(L) {
+            let v = *b as u16 + l as u16 + carry;
+            *b = v as u8;
+            carry = v >> 8;
+        }
+        assert_eq!(
+            Ed25519Scheme.verify(&kp.public, b"m", &sig),
+            Err(CryptoError::VerificationFailed)
         );
     }
 
